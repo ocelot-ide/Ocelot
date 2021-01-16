@@ -11,6 +11,10 @@ import * as morgan from 'morgan'; // for logging in all http traffic on console.
 import { ErrorReporting } from '@google-cloud/error-reporting';
 import * as rpn from 'request-promise-native';
 import { URLSearchParams } from 'url';
+import * as request from 'request';
+import { v4 as uuidv4 } from 'uuid';
+
+const instanceId = uuidv4();
 
 const errorReporting = new ErrorReporting();
 
@@ -458,6 +462,25 @@ async function login(req: Request) {
   };
 }
 
+/**
+ * Dummy function for Containerless data collection.
+ *
+ * @param {Request} req
+ * @returns statusCode and contents in body
+ */
+async function dummy(req: Request) {
+  return {
+    statusCode: 200,
+    body: {
+      status: 'success',
+      data: {
+        message: "Dummy!",
+      }
+    }
+  };
+}
+
+
 async function downloadUrl(url: string) {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return await rpn.get(url, { encoding: null });
@@ -558,6 +581,29 @@ function wrapHandler(handler: (req: Request) => Promise<{ statusCode: number, bo
   }
 }
 
+function containerlessHandler(handler: (req: Request, res: Response) => void) {
+  return (req: Request, res: Response) => {
+    let options = {
+      url: 'http://35.227.19.125:80/containerless',
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json'
+      },
+      body: {
+        method:req.path,
+        time: new Date().toJSON(),
+        instanceId: instanceId,
+        data: req.body
+      }
+    };
+
+    let promise1 = request.post(options, function(_err: any, _res: any, _body: any) {
+      // check to see if successful? Probably not necessary  
+    });
+    handler(req, res);
+  }
+}
+
 paws.post('/listfiles', wrapHandler2(req =>
   authorize(req, async email => {
     const [files] = await fileBucket.getFiles({ prefix: `${email}/` });
@@ -577,6 +623,7 @@ paws.post('/read', wrapHandler2(req =>
     return { statusCode: 200, body: buf.toString() };
   })));
 
+paws.post('/dummy', containerlessHandler(wrapHandler(dummy)));
 paws.post('/login', wrapHandler(login));
 paws.post('/changefile', wrapHandler(changeFile));
 paws.post('/savehistory', wrapHandler(saveToHistory));
